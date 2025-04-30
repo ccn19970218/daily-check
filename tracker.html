@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>打卡系統（登入版）</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+    #loginPage, #appPage { display: none; }
+    #calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 10px; }
+    .day { border: 1px solid #ccc; padding: 10px; border-radius: 6px; text-align: center; cursor: pointer; }
+    .sunday { color: red; } .saturday { color: blue; }
+    #recordArea img { max-width: 100px; display: block; margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+<h1>每日打卡系統</h1>
+
+<div id="loginPage">
+  <h2>登入 / 註冊</h2>
+  <input type="text" id="nickname" placeholder="暱稱" /><br />
+  <input type="password" id="password" placeholder="密碼" /><br />
+  <button onclick="login()">登入 / 註冊</button>
+</div>
+
+<div id="appPage">
+  <div>
+    <button onclick="logout()">登出</button>
+    <h2 id="monthTitle"></h2>
+    <button onclick="prevMonth()">← 上個月</button>
+    <button onclick="nextMonth()">下個月 →</button>
+  </div>
+
+  <div id="calendar"></div>
+
+  <h3>目標設定</h3>
+  <input type="text" id="dailyGoalInput" placeholder="新增每日目標" />
+  <input type="color" id="goalColor" value="#9932CC" />
+  <button onclick="addDailyGoal()">新增每日目標</button>
+  <div id="dailyGoals"></div>
+
+  <input type="text" id="singleGoalInput" placeholder="新增單次目標" />
+  <button onclick="addSingleGoal()">新增單次目標</button>
+  <div id="singleGoals"></div>
+
+  <hr>
+  <div id="recordArea"></div>
+</div>
+
+<script>
+  let currentUser = null;
+  let selectedDate = null;
+  let currentDate = new Date();
+  let currentMonth = currentDate.getMonth();
+  let currentYear = currentDate.getFullYear();
+
+  function showLoginPage() {
+    document.getElementById("loginPage").style.display = "block";
+    document.getElementById("appPage").style.display = "none";
+  }
+
+  function showAppPage() {
+    document.getElementById("loginPage").style.display = "none";
+    document.getElementById("appPage").style.display = "block";
+    renderCalendar();
+    renderGoals();
+  }
+
+  function login() {
+    const nick = document.getElementById("nickname").value.trim();
+    const pass = document.getElementById("password").value;
+
+    if (!nick || !pass) return alert("請輸入暱稱和密碼");
+
+    let users = JSON.parse(localStorage.getItem("users") || "{}");
+
+    if (users[nick]) {
+      if (users[nick].password !== pass) {
+        return alert("密碼錯誤！");
+      }
+    } else {
+      users[nick] = { password: pass }; // 註冊
+    }
+
+    localStorage.setItem("users", JSON.stringify(users));
+    currentUser = nick;
+    showAppPage();
+  }
+
+  function logout() {
+    currentUser = null;
+    showLoginPage();
+  }
+
+  function getKey(key) {
+    return `${currentUser}_${key}`;
+  }
+
+  function getGoals(type) {
+    return JSON.parse(localStorage.getItem(getKey(type)) || "[]");
+  }
+
+  function saveGoals(type, data) {
+    localStorage.setItem(getKey(type), JSON.stringify(data));
+  }
+
+  function formatDate(date) {
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  }
+
+  function renderCalendar() {
+    const monthTitle = document.getElementById("monthTitle");
+    monthTitle.textContent = `${currentYear} 年 ${currentMonth + 1} 月`;
+    const calendar = document.getElementById("calendar");
+    calendar.innerHTML = "";
+
+    const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+    const days = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+    for (let i = 0; i < firstDay; i++) calendar.appendChild(document.createElement("div"));
+
+    for (let d = 1; d <= days; d++) {
+      const date = new Date(currentYear, currentMonth, d);
+      const dateStr = formatDate(date);
+      const div = document.createElement("div");
+      div.className = "day";
+      if (date.getDay() === 0) div.classList.add("sunday");
+      if (date.getDay() === 6) div.classList.add("saturday");
+
+      const rate = getCompletionRate(dateStr);
+      if (rate >= 100) div.style.background = getGoalColor() || "#9932CC";
+      else if (rate >= 80) div.style.background = "#87CEFA";
+      else if (rate >= 50) div.style.background = "#FFB6C1";
+
+      div.textContent = d;
+      div.onclick = () => openRecord(dateStr);
+      calendar.appendChild(div);
+    }
+  }
+
+  function prevMonth() {
+    currentMonth--;
+    if (currentMonth < 0) {
+      currentMonth = 11;
+      currentYear--;
+    }
+    renderCalendar();
+  }
+
+  function nextMonth() {
+    currentMonth++;
+    if (currentMonth > 11) {
+      currentMonth = 0;
+      currentYear++;
+    }
+    renderCalendar();
+  }
+
+  function addDailyGoal() {
+    const input = document.getElementById("dailyGoalInput");
+    const color = document.getElementById("goalColor").value;
+    if (!input.value) return;
+    const goals = getGoals("dailyGoals");
+    goals.push({ text: input.value, color });
+    saveGoals("dailyGoals", goals);
+    input.value = "";
+    renderGoals();
+    renderCalendar();
+  }
+
+  function addSingleGoal() {
+    const input = document.getElementById("singleGoalInput");
+    if (!input.value) return;
+    const goals = getGoals("singleGoals");
+    goals.push({ text: input.value, done: false });
+    saveGoals("singleGoals", goals);
+    input.value = "";
+    renderGoals();
+  }
+
+  function renderGoals() {
+    const dailyDiv = document.getElementById("dailyGoals");
+    const singleDiv = document.getElementById("singleGoals");
+    dailyDiv.innerHTML = "";
+    singleDiv.innerHTML = "";
+
+    getGoals("dailyGoals").forEach((g, i) => {
+      const el = document.createElement("div");
+      el.innerHTML = `<input type="checkbox" onchange="markGoal('${formatDate(new Date())}', ${i}, this.checked)"> ${g.text} <button onclick="removeGoal(${i}, 'dailyGoals')">刪除</button>`;
+      dailyDiv.appendChild(el);
+    });
+
+    getGoals("singleGoals").forEach((g, i) => {
+      const el = document.createElement("div");
+      el.innerHTML = `<input type="checkbox" ${g.done ? "checked" : ""} onchange="toggleSingle(${i}, this.checked)"> ${g.text} <button onclick="removeGoal(${i}, 'singleGoals')">刪除</button>`;
+      singleDiv.appendChild(el);
+    });
+  }
+
+  function removeGoal(index, type) {
+    const goals = getGoals(type);
+    goals.splice(index, 1);
+    saveGoals(type, goals);
+    renderGoals();
+    renderCalendar();
+  }
+
+  function toggleSingle(index, checked) {
+    const goals = getGoals("singleGoals");
+    goals[index].done = checked;
+    saveGoals("singleGoals", goals);
+  }
+
+  function markGoal(dateStr, goalIndex, checked) {
+    const key = getKey("records");
+    const data = JSON.parse(localStorage.getItem(key) || "{}");
+    if (!data[dateStr]) data[dateStr] = { completed: [] };
+    const arr = data[dateStr].completed;
+    if (checked && !arr.includes(goalIndex)) arr.push(goalIndex);
+    else if (!checked) data[dateStr].completed = arr.filter(i => i !== goalIndex);
+    localStorage.setItem(key, JSON.stringify(data));
+    renderCalendar();
+  }
+
+  function getCompletionRate(dateStr) {
+    const goals = getGoals("dailyGoals");
+    const records = JSON.parse(localStorage.getItem(getKey("records")) || "{}");
+    const done = records[dateStr]?.completed?.length || 0;
+    return goals.length ? (done / goals.length) * 100 : 0;
+  }
+
+  function getGoalColor() {
+    const goals = getGoals("dailyGoals");
+    return goals[0]?.color || "#9932CC";
+  }
+
+  function openRecord(dateStr) {
+    selectedDate = dateStr;
+    const area = document.getElementById("recordArea");
+    const records = JSON.parse(localStorage.getItem(getKey("records")) || "{}");
+    const r = records[dateStr] || {};
+    const text = r.text || "";
+    const img = r.image || "";
+
+    area.innerHTML = `
+      <h3>${dateStr} 的紀錄</h3>
+      <textarea id="textInput" rows="4" placeholder="輸入今天的紀錄...">${text}</textarea>
+      <input type="file" accept="image/*" onchange="saveImage(event)">
+      ${img ? `<img src="${img}" />` : ""}
+      <button onclick="saveRecord()">儲存</button>
+    `;
+  }
+
+  function saveImage(event) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const records = JSON.parse(localStorage.getItem(getKey("records")) || "{}");
+      if (!records[selectedDate]) records[selectedDate] = {};
+      records[selectedDate].image = reader.result;
+      localStorage.setItem(getKey("records"), JSON.stringify(records));
+      openRecord(selectedDate);
+    };
+    reader.readAsDataURL(event.target.files[0]);
+  }
+
+  function saveRecord() {
+    const text = document.getElementById("textInput").value;
+    const records = JSON.parse(localStorage.getItem(getKey("records")) || "{}");
+    if (!records[selectedDate]) records[selectedDate] = {};
+    records[selectedDate].text = text;
+    localStorage.setItem(getKey("records"), JSON.stringify(records));
+    alert("已儲存！");
+  }
+
+  // 初始顯示登入頁面
+  showLoginPage();
+</script>
+
+</body>
+</html>
